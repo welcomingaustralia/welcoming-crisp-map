@@ -4,8 +4,11 @@
   <meta charset="utf-8" />
   <title>Welcoming Cities + CRISP LGA Map</title>
 
+  <!-- Leaflet core -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet pattern plugin -->
   <script src="https://unpkg.com/leaflet.pattern/dist/leaflet.pattern.js"></script>
 
   <style>
@@ -51,6 +54,7 @@
 
 <body>
 
+<!-- State dropdown -->
 <select id="stateSelector">
   <option value="">Select state</option>
   <option value="NSW">NSW</option>
@@ -67,7 +71,7 @@
 
 <script>
 
-// CSV loader
+// Load CSV into a Set
 function loadCSVAsSet(url) {
   return fetch(url)
     .then(res => res.text())
@@ -76,14 +80,26 @@ function loadCSVAsSet(url) {
     );
 }
 
-const LGA_NAME_FIELD = "LGA_NAME21"; // correct for your dataset
+// Name cleaner — converts "Hume (C)" → "Hume"
+function cleanName(raw) {
+  return raw
+    .replace(/\s*\(.*?\)\s*/g, "")   // remove (C), (RC), (DC), etc.
+    .replace(/ City$/i, "")          // remove ' City'
+    .replace(/ Council$/i, "")       // remove ' Council'
+    .trim();
+}
+
+// Our ABS LGA name key
+const LGA_NAME_FIELD = "LGA_NAME21";
 
 const welcomingColor = "#4f83cc";
 const crispColor = "#e8a04b";
 
 const map = L.map("map").setView([-25.5, 134.5], 4);
+
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
+// Pattern for "both" LGAs
 const bothPattern = new L.StripePattern({
   weight: 4,
   spaceWeight: 4,
@@ -93,6 +109,7 @@ const bothPattern = new L.StripePattern({
 });
 bothPattern.addTo(map);
 
+// Load all data
 Promise.all([
   loadCSVAsSet("welcoming_lgas.csv"),
   loadCSVAsSet("crisp_lgas.csv"),
@@ -105,7 +122,9 @@ Promise.all([
   const otherLayer = L.geoJSON(null);
 
   function style(feature) {
-    const name = feature.properties[LGA_NAME_FIELD];
+    const raw = feature.properties[LGA_NAME_FIELD];
+    const name = cleanName(raw);
+
     const inW = welcomingSet.has(name);
     const inC = crispSet.has(name);
 
@@ -116,15 +135,21 @@ Promise.all([
   }
 
   function each(feature, layer) {
-    const name = feature.properties[LGA_NAME_FIELD];
+    const raw = feature.properties[LGA_NAME_FIELD];
+    const name = cleanName(raw);
+
     const tags = [];
     if (welcomingSet.has(name)) tags.push("Welcoming Cities");
     if (crispSet.has(name)) tags.push("CRISP");
-    layer.bindTooltip(`<b>${name}</b><br>${tags.join(" & ") || "None"}`);
+
+    layer.bindTooltip(`<b>${raw}</b><br>${tags.join(" & ") || "None"}`);
   }
 
+  // Sort LGAs into layers
   geojson.features.forEach(f => {
-    const name = f.properties[LGA_NAME_FIELD];
+    const raw = f.properties[LGA_NAME_FIELD];
+    const name = cleanName(raw);
+
     const inW = welcomingSet.has(name);
     const inC = crispSet.has(name);
 
@@ -136,6 +161,7 @@ Promise.all([
     else otherLayer.addData(f, opts);
   });
 
+  // Add layers
   otherLayer.addTo(map);
   welcomingLayer.addTo(map);
   crispLayer.addTo(map);
@@ -155,13 +181,31 @@ Promise.all([
     ACT: [[-35.92, 148.75], [-35.12, 149.4]]
   };
 
+  // Dropdown zoom
   document.getElementById("stateSelector").addEventListener("change", e => {
     const st = e.target.value;
     if (stateBounds[st]) map.fitBounds(stateBounds[st]);
   });
 
-});
+  // Legend
+  const legend = L.control({ position: "bottomright" });
 
+  legend.onAdd = function() {
+    const div = L.DomUtil.create("div", "legend");
+    div.innerHTML = `
+      <div class="legend-item"><div class="legend-color" style="background:${welcomingColor};"></div>Welcoming Cities</div>
+      <div class="legend-item"><div class="legend-color" style="background:${crispColor};"></div>CRISP</div>
+      <div class="legend-item"><div class="legend-color" style="
+        background: repeating-linear-gradient(45deg, ${welcomingColor}, ${welcomingColor} 4px, white 4px, white 8px);
+      "></div>Both</div>
+      <div class="legend-item"><div class="legend-color" style="background:#e5e5e5; border-color:#aaa;"></div>Other LGAs</div>
+    `;
+    return div;
+  };
+  legend.addTo(map);
+
+});
 </script>
+
 </body>
 </html>
