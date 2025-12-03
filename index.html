@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Welcoming Cities + CRISP LGA Map</title>
+
+  <!-- Leaflet core -->
+  <link
+    rel="stylesheet"
+    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+  />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet Pattern plugin (for striped "both" areas) -->
+  <script src="https://unpkg.com/leaflet.pattern/dist/leaflet.pattern.js"></script>
+
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+    }
+    #map {
+      width: 100%;
+      height: 100%;
+    }
+    .legend {
+      background: white;
+      padding: 8px 12px;
+      line-height: 1.4;
+      font-size: 13px;
+      border-radius: 4px;
+      box-shadow: 0 0 4px rgba(0,0,0,0.3);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .legend-color {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #555;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+
+<script>
+// --------------------------------------------------
+// 1. Helper: simple CSV loader (one value per line)
+// --------------------------------------------------
+function loadCSVAsSet(url) {
+  return fetch(url)
+    .then(res => res.text())
+    .then(text => {
+      const lines = text
+        .split(/\r?\n/)
+        .map(l => l.trim())
+        .filter(l => l.length > 0 && !l.startsWith("#")); // ignore empty & # comments
+      return new Set(lines);
+    });
+}
+
+// --------------------------------------------------
+// 2. Configuration: colours & property names
+// --------------------------------------------------
+const welcomingColor = "#4f83cc"; // soft blue
+const crispColor = "#e8a04b";     // soft amber/orange
+
+// Change this if your GeoJSON uses a different property for LGA names
+const LGA_NAME_FIELD = "LGA_NAME";
+
+// --------------------------------------------------
+// 3. Map setup
+// --------------------------------------------------
+const map = L.map("map").setView([-25.5, 134.5], 4);
+
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  maxZoom: 18,
+  attribution: "&copy; OpenStreetMap contributors"
+}).addTo(map);
+
+// Pattern for LGAs that belong to BOTH programs
+const bothPattern = new L.StripePattern({
+  weight: 4,
+  spaceWeight: 4,
+  color: welcomingColor,
+  opacity: 0.7,
+  angle: 45
+});
+bothPattern.addTo(map);
+
+// --------------------------------------------------
+// 4. Load CSVs + GeoJSON together
+// --------------------------------------------------
+Promise.all([
+  loadCSVAsSet("data/welcoming_cities_lgas.csv"),
+  loadCSVAsSet("data/crisp_lgas.csv"),
+  fetch("data/lgas.geojson").then(res => res.json())
+]).then(([welcomingSet, crispSet, geojsonData]) => {
+
+  // We will build separate layers so we can toggle them
+  const welcomingLayer = L.geoJSON(null);
+  const crispLayer = L.geoJSON(null);
+  const bothLayer = L.geoJSON(null);
+  const otherLGALayer = L.geoJSON(null); // if you want to show the rest faintly
+
+  // Single function to create layers with different styling
+  function styleFeature(feature) {
+    const name = (feature.properties[LGA_NAME_FIELD] || "").trim();
+
+    const isWelcoming = welcomingSet.has(name);
+    const isCRISP = crispSet.has(name);
+
+    if (isWelcoming && isCRISP) {
+      return {
+        fillPattern: bothPattern,
+        color: "#555",
+        weight: 1,
+        fillOpacity: 1
+      };
+    } else if (isWelcoming) {
+      return {
+        fillColor: welcomingColor,
+        color: "#555",
+        weight: 1,
+        fillOpacity: 0.7
+      };
+    } else if (isCRISP) {
+      return {
+        fillColor: crispColor,
+        color: "#555",
+        weight: 1,
+        fillOpacity: 0.7
+      };
+    } else {
+      return {
+        fillColor: "#f0f0f0",
+        color: "#ccc",
+        weight: 0.5,
+        fillOpacity: 0.3
+      };
+    }
+  }
+
+  function onEachFeature(feature, layer) {
+    const name = feature.properties[LGA_NAME_FIELD];
+    const isWelcoming = welcomingSet.has(name);
+    const isCRISP = crispSet.has(name);
+
+    let programs = [];
+    if (isWelcoming) programs.push("Welcoming Cities");
+    if (isCRISP) programs.push("CRISP");
+
+    const programText = programs.length > 0
+      ? programs.join(" & ")
+      : "Not in Welcoming Cities or CRISP";
+
+    layer.bindTooltip(`<strong>${name}</strong><br>${programText}`);
+  }
+
+  // Split features into different layers
+  geojsonData.features.forEach(feat => {
+    const name = (feat.properties[LGA_NAME_FIELD] || "").trim();
+    const isWelcoming = welcomingSet.has(name);
+    const isCRISP = crispSet.has(name);
+
+    const layerOptions = {
+      style: styleFeature,
+      onEachFeature: onEachFeature
+    };
+
+    if (isWelcoming && isCRISP) {
+      bothLayer.addData(feat, layerOptions);
+    } else if (isWelcoming) {
+      welcomingLayer.addData(feat, layerOptions);
+    } else if (isCRISP) {
+      crispLayer.addData(feat, layerOptions);
+    } else {
+      otherLGALayer.addData(feat, layerOptions);
+    }
+  });
+
+  // Add layers to map
+  otherLGALayer.addTo(map);       // background LGAs
+  welcomingLayer.addTo(map);
+  crispLayer.addTo(map);
+  bothLayer.addTo(map);
+
+  // Zoom to bounds of all LGAs
+  map.fitBounds(L.geoJSON(geojsonData).getBounds());
+
+  // ------------------------------------------------
+  // 5. Layer control (tick on/off Welcoming & CRISP)
+  // ------------------------------------------------
+  const overlays = {
+    "Welcoming Cities": welcomingLayer,
+    "CRISP": crispLayer,
+    "Both (Welcoming + CRISP)": bothLayer,
+    "Other LGAs": otherLGALayer
+  };
+
+  L.control.layers(null, overlays, { collapsed: false }).addTo(map);
+
+  // ------------------------------------------------
+  // 6. Legend
+  // ------------------------------------------------
+  const legend = L.control({ position: "bottomright" });
+
+  legend.onAdd = function() {
+    const div = L.DomUtil.create("div", "legend");
+
+    div.innerHTML = `
+      <div class="legend-item">
+        <div class="legend-color" style="background:${welcomingColor};"></div>
+        <span>Welcoming Cities</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background:${crispColor};"></div>
+        <span>CRISP</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background: repeating-linear-gradient(45deg, ${welcomingColor}, ${welcomingColor} 4px, white 4px, white 8px);"></div>
+        <span>Both</span>
+      </div>
+      <div class="legend-item">
+        <div class="legend-color" style="background:#f0f0f0; border-color:#ccc;"></div>
+        <span>Other LGAs</span>
+      </div>
+    `;
+    return div;
+  };
+
+  legend.addTo(map);
+
+}).catch(err => {
+  console.error("Error loading data:", err);
+});
+</script>
+</body>
+</html>
