@@ -11,11 +11,46 @@
   <style>
     html, body { margin:0; height:100%; }
     #map { width:100%; height:100%; }
+
+    /* TOP-RIGHT DROPDOWN */
+    #stateSelector {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      z-index: 9999;
+      background: white;
+      padding: 6px 10px;
+      border-radius: 4px;
+      border: 1px solid #888;
+      font-size: 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+
+    /* LEGEND */
+    .legend {
+      background: white;
+      padding: 10px 12px;
+      font-size: 14px;
+      line-height: 1.4;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 6px;
+    }
+    .legend-color {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #555;
+      margin-right: 6px;
+    }
   </style>
 </head>
 <body>
 
-<!-- ⭐ SVG PATTERN FOR BOTH (blue + orange stripes) -->
+<!-- ⭐ SVG PATTERN FOR BOTH LGAs -->
 <svg width="0" height="0">
   <defs>
     <pattern id="blueOrangePattern" patternUnits="userSpaceOnUse" width="12" height="12" patternTransform="rotate(45)">
@@ -25,10 +60,23 @@
   </defs>
 </svg>
 
+<!-- ⭐ STATE DROPDOWN (TOP RIGHT) -->
+<select id="stateSelector">
+  <option value="">Select state</option>
+  <option value="NSW">New South Wales</option>
+  <option value="VIC">Victoria</option>
+  <option value="QLD">Queensland</option>
+  <option value="SA">South Australia</option>
+  <option value="WA">Western Australia</option>
+  <option value="TAS">Tasmania</option>
+  <option value="NT">Northern Territory</option>
+  <option value="ACT">ACT</option>
+</select>
+
 <div id="map"></div>
 
 <script>
-// ⭐⭐ RAW GITHUB URLs ⭐⭐
+// ⭐ RAW GITHUB URLs
 const GEOJSON_URL =
   "https://raw.githubusercontent.com/welcomingaustralia/welcoming-crisp-map/main/LGA_2025_AUST_GDA2020.min.json";
 
@@ -38,20 +86,22 @@ const WELC_URL =
 const CRISP_URL =
   "https://raw.githubusercontent.com/welcomingaustralia/welcoming-crisp-map/main/crisp_lgas.csv";
 
-// PapaParse loader
 function loadCSV(url) {
   return fetch(url)
     .then(r => r.text())
     .then(t => Papa.parse(t, { header: true, skipEmptyLines: true }).data);
 }
 
-const LGA_FIELD = "LGA_NAME25";  // same as your working map
+const LGA_FIELD = "LGA_NAME25";
+
 const welcomingColor = "#4f83cc";
 const crispColor = "#e8a04b";
 
 const map = L.map("map").setView([-25,134],4);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
+
+// ⭐ LOAD EVERYTHING
 Promise.all([
   loadCSV(WELC_URL),
   loadCSV(CRISP_URL),
@@ -59,25 +109,17 @@ Promise.all([
 ])
 .then(([welcRows, crispRows, geojson]) => {
 
-  // Convert CSV lists → Sets
-  const welcomingSet = new Set(
-    welcRows.map(r => r.lga_name?.trim()).filter(Boolean)
-  );
-
-  const crispSet = new Set(
-    crispRows.map(r => r.LGA?.trim()).filter(Boolean)
-  );
+  const welcomingSet = new Set(welcRows.map(r => r.lga_name?.trim()).filter(Boolean));
+  const crispSet = new Set(crispRows.map(r => r.LGA?.trim()).filter(Boolean));
 
   console.log("Welcoming:", welcomingSet);
   console.log("CRISP:", crispSet);
 
-  // ⭐⭐ STYLE LOGIC ⭐⭐
   function style(feature) {
     const name = feature.properties[LGA_FIELD];
     const inW = welcomingSet.has(name);
     const inC = crispSet.has(name);
 
-    // BOTH → striped pattern (blue + orange)
     if (inW && inC) {
       return {
         fillColor: "url(#blueOrangePattern)",
@@ -86,8 +128,6 @@ Promise.all([
         fillOpacity: 1
       };
     }
-
-    // Welcoming only → blue
     if (inW) {
       return {
         fillColor: welcomingColor,
@@ -96,8 +136,6 @@ Promise.all([
         fillOpacity: 0.75
       };
     }
-
-    // CRISP only → orange
     if (inC) {
       return {
         fillColor: crispColor,
@@ -106,8 +144,6 @@ Promise.all([
         fillOpacity: 0.75
       };
     }
-
-    // All others → transparent outline
     return {
       fillColor: "transparent",
       color: "#ccc",
@@ -116,7 +152,6 @@ Promise.all([
     };
   }
 
-  // Draw LGAs
   L.geoJSON(geojson, {
     style,
     onEachFeature: (feature, layer) => {
@@ -124,14 +159,62 @@ Promise.all([
       const labels = [];
       if (welcomingSet.has(name)) labels.push("Welcoming Cities");
       if (crispSet.has(name)) labels.push("CRISP");
-      layer.bindTooltip(`<b>${name}</b><br>${labels.join(" & ") || ""}`);
+      layer.bindTooltip(`<b>${name}</b><br>${labels.join(" & ")}`);
     }
   }).addTo(map);
 
-  // Fit to Australia
   map.fitBounds(L.geoJSON(geojson).getBounds());
-});
 
+
+  // ⭐ STATE BOUNDING BOXES
+  const stateBounds = {
+    NSW: [[-37.51, 140.96], [-28.16, 153.64]],
+    VIC: [[-39.2, 140.96], [-33.98, 150]],
+    QLD: [[-29.18, 138], [-9.14, 153.55]],
+    SA:  [[-38.06, 129], [-25.0, 141]],
+    WA:  [[-35.1, 112], [-13, 129]],
+    TAS: [[-44.0, 144], [-39, 149]],
+    NT:  [[-26, 129], [-10, 138]],
+    ACT: [[-35.92, 148.75], [-35.12, 149.4]]
+  };
+
+  document.getElementById("stateSelector").addEventListener("change", e => {
+    const st = e.target.value;
+    if (stateBounds[st]) map.fitBounds(stateBounds[st]);
+  });
+
+
+  // ⭐ LEGEND (BOTTOM RIGHT)
+  const legend = L.control({ position: "bottomright" });
+
+  legend.onAdd = function () {
+    const div = L.DomUtil.create("div", "legend");
+
+    div.innerHTML = `
+      <div class="legend-item">
+        <div class="legend-color" style="background:${welcomingColor};"></div>
+        Welcoming Cities
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" style="background:${crispColor};"></div>
+        CRISP
+      </div>
+
+      <div class="legend-item">
+        <div class="legend-color" 
+             style="background: repeating-linear-gradient(45deg, #4f83cc 0 6px, #e8a04b 6px 12px);">
+        </div>
+        Both
+      </div>
+    `;
+
+    return div;
+  };
+
+  legend.addTo(map);
+
+});
 </script>
 </body>
 </html>
