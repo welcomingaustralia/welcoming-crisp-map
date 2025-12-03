@@ -2,13 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Welcoming Cities + CRISP LGA Map</title>
+  <title>CRISP + Welcoming Cities LGA Map</title>
 
-  <!-- Leaflet core -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- Leaflet pattern plugin -->
   <script src="https://unpkg.com/leaflet.pattern/dist/leaflet.pattern.js"></script>
 
   <style>
@@ -19,24 +16,27 @@
       position: absolute;
       top: 10px;
       left: 10px;
-      z-index: 9999 !important;
+      z-index: 9999;
       padding: 6px;
       background: white;
       border-radius: 4px;
       border: 1px solid #777;
     }
 
-    .leaflet-control-zoom {
-      z-index: 5000 !important;
-    }
+    .leaflet-control-zoom { z-index: 5000 !important; }
 
     .legend {
       background: white;
       padding: 8px 12px;
       line-height: 1.4;
       font-size: 13px;
-      border-radius: 4px;
-      box-shadow: 0 0 4px rgba(0,0,0,0.3);
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.3);
+    }
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
     }
     .legend-color {
       width: 18px;
@@ -44,17 +44,11 @@
       border: 1px solid #555;
       margin-right: 6px;
     }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 4px;
-    }
   </style>
 </head>
 
 <body>
 
-<!-- State dropdown -->
 <select id="stateSelector">
   <option value="">Select state</option>
   <option value="NSW">NSW</option>
@@ -71,35 +65,27 @@
 
 <script>
 
-// Load CSV into a Set
-function loadCSVAsSet(url) {
+// CSV loader
+function loadCSVSet(url) {
   return fetch(url)
-    .then(res => res.text())
-    .then(text =>
-      new Set(text.split(/\r?\n/).map(l => l.trim()).filter(Boolean))
-    );
+    .then(r => r.text())
+    .then(t => new Set(
+      t.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+    ));
 }
 
-// Name cleaner — converts "Hume (C)" → "Hume"
-function cleanName(raw) {
-  return raw
-    .replace(/\s*\(.*?\)\s*/g, "")   // remove (C), (RC), (DC), etc.
-    .replace(/ City$/i, "")          // remove ' City'
-    .replace(/ Council$/i, "")       // remove ' Council'
-    .trim();
-}
+// IMPORTANT: The CORRECT property
+const LGA_NAME_FIELD = "LGA_NAME25";
 
-// Our ABS LGA name key
-const LGA_NAME_FIELD = "LGA_NAME21";
-
+// Colours
 const welcomingColor = "#4f83cc";
 const crispColor = "#e8a04b";
 
-const map = L.map("map").setView([-25.5, 134.5], 4);
-
+// Map init
+const map = L.map("map").setView([-25, 134], 4);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-// Pattern for "both" LGAs
+// Pattern for LGAs in BOTH
 const bothPattern = new L.StripePattern({
   weight: 4,
   spaceWeight: 4,
@@ -109,50 +95,41 @@ const bothPattern = new L.StripePattern({
 });
 bothPattern.addTo(map);
 
-// Load all data
 Promise.all([
-  loadCSVAsSet("welcoming_lgas.csv"),
-  loadCSVAsSet("crisp_lgas.csv"),
+  loadCSVSet("welcoming_lgas.csv"),
+  loadCSVSet("crisp_lgas.csv"),
   fetch("LGA_2025_AUST_GDA2020.min.json").then(r => r.json())
-]).then(([welcomingSet, crispSet, geojson]) => {
+])
+.then(([welcomingSet, crispSet, geojson]) => {
 
   const welcomingLayer = L.geoJSON(null);
   const crispLayer = L.geoJSON(null);
   const bothLayer = L.geoJSON(null);
   const otherLayer = L.geoJSON(null);
 
-  function style(feature) {
-    const raw = feature.properties[LGA_NAME_FIELD];
-    const name = cleanName(raw);
-
+  function style(f) {
+    const name = f.properties[LGA_NAME_FIELD];
     const inW = welcomingSet.has(name);
     const inC = crispSet.has(name);
 
-    if (inW && inC) return { fillPattern: bothPattern, color:"#444", weight:1 };
-    if (inW) return { fillColor: welcomingColor, color:"#444", weight:1, fillOpacity:0.7 };
-    if (inC) return { fillColor: crispColor, color:"#444", weight:1, fillOpacity:0.7 };
-    return { fillColor:"#e5e5e5", color:"#aaa", weight:0.5, fillOpacity:0.3 };
+    if (inW && inC) return { fillPattern: bothPattern, color:"#333", weight:1 };
+    if (inW) return { fillColor: welcomingColor, color:"#333", weight:1, fillOpacity:0.70 };
+    if (inC) return { fillColor: crispColor, color:"#333", weight:1, fillOpacity:0.70 };
+    return { fillColor:"#e5e5e5", color:"#999", weight:0.5, fillOpacity:0.3 };
   }
 
-  function each(feature, layer) {
-    const raw = feature.properties[LGA_NAME_FIELD];
-    const name = cleanName(raw);
-
+  function each(f, layer) {
+    const name = f.properties[LGA_NAME_FIELD];
     const tags = [];
     if (welcomingSet.has(name)) tags.push("Welcoming Cities");
     if (crispSet.has(name)) tags.push("CRISP");
-
-    layer.bindTooltip(`<b>${raw}</b><br>${tags.join(" & ") || "None"}`);
+    layer.bindTooltip(`<b>${name}</b><br>${tags.join(" & ") || "None"}`);
   }
 
-  // Sort LGAs into layers
   geojson.features.forEach(f => {
-    const raw = f.properties[LGA_NAME_FIELD];
-    const name = cleanName(raw);
-
+    const name = f.properties[LGA_NAME_FIELD];
     const inW = welcomingSet.has(name);
     const inC = crispSet.has(name);
-
     const opts = { style, onEachFeature: each };
 
     if (inW && inC) bothLayer.addData(f, opts);
@@ -161,7 +138,6 @@ Promise.all([
     else otherLayer.addData(f, opts);
   });
 
-  // Add layers
   otherLayer.addTo(map);
   welcomingLayer.addTo(map);
   crispLayer.addTo(map);
@@ -169,28 +145,25 @@ Promise.all([
 
   map.fitBounds(L.geoJSON(geojson).getBounds());
 
-  // State bounding boxes
-  const stateBounds = {
-    NSW: [[-37.51, 140.96], [-28.16, 153.64]],
-    VIC: [[-39.2, 140.96], [-33.98, 150.0]],
-    QLD: [[-29.18, 138.0], [-9.14, 153.55]],
-    SA:  [[-38.06, 129.0], [-25.0, 141.0]],
-    WA:  [[-35.1, 112.0], [-13.0, 129.0]],
-    TAS: [[-44.0, 144.0], [-39.0, 149.0]],
-    NT:  [[-26.0, 129.0], [-10.0, 138.0]],
-    ACT: [[-35.92, 148.75], [-35.12, 149.4]]
+  // Dropdown zoom
+  const bounds = {
+    NSW: [[-37.51,140.96],[-28.16,153.64]],
+    VIC: [[-39.2,140.96],[-33.98,150]],
+    QLD: [[-29.18,138],[-9.14,153.55]],
+    SA:  [[-38.06,129],[-25,141]],
+    WA:  [[-35.1,112],[-13,129]],
+    TAS: [[-44,144],[-39,149]],
+    NT:  [[-26,129],[-10,138]],
+    ACT: [[-35.92,148.75],[-35.12,149.4]]
   };
 
-  // Dropdown zoom
   document.getElementById("stateSelector").addEventListener("change", e => {
-    const st = e.target.value;
-    if (stateBounds[st]) map.fitBounds(stateBounds[st]);
+    if (bounds[e.target.value]) map.fitBounds(bounds[e.target.value]);
   });
 
   // Legend
   const legend = L.control({ position: "bottomright" });
-
-  legend.onAdd = function() {
+  legend.onAdd = function () {
     const div = L.DomUtil.create("div", "legend");
     div.innerHTML = `
       <div class="legend-item"><div class="legend-color" style="background:${welcomingColor};"></div>Welcoming Cities</div>
@@ -198,7 +171,7 @@ Promise.all([
       <div class="legend-item"><div class="legend-color" style="
         background: repeating-linear-gradient(45deg, ${welcomingColor}, ${welcomingColor} 4px, white 4px, white 8px);
       "></div>Both</div>
-      <div class="legend-item"><div class="legend-color" style="background:#e5e5e5; border-color:#aaa;"></div>Other LGAs</div>
+      <div class="legend-item"><div class="legend-color" style="background:#e5e5e5; border-color:#999;"></div>Other LGAs</div>
     `;
     return div;
   };
