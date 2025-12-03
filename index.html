@@ -4,26 +4,29 @@
   <meta charset="utf-8" />
   <title>Welcoming Cities + CRISP LGA Map</title>
 
-  <!-- Leaflet core -->
-  <link
-    rel="stylesheet"
-    href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-  />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
-  <!-- Leaflet Pattern plugin (for striped “both” areas) -->
   <script src="https://unpkg.com/leaflet.pattern/dist/leaflet.pattern.js"></script>
 
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      height: 100%;
+    html, body { margin: 0; height: 100%; }
+    #map { width: 100%; height: 100%; }
+
+    #stateSelector {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      z-index: 9999 !important;
+      padding: 6px;
+      background: white;
+      border-radius: 4px;
+      border: 1px solid #777;
     }
-    #map {
-      width: 100%;
-      height: 100%;
+
+    .leaflet-control-zoom {
+      z-index: 5000 !important;
     }
+
     .legend {
       background: white;
       padding: 8px 12px;
@@ -32,131 +35,133 @@
       border-radius: 4px;
       box-shadow: 0 0 4px rgba(0,0,0,0.3);
     }
-    .legend-item {
-      display: flex;
-      align-items: center;
-      margin-bottom: 4px;
-    }
     .legend-color {
       width: 18px;
       height: 18px;
       border: 1px solid #555;
       margin-right: 6px;
     }
-
-    /* Dropdown styling */
-    #stateSelector {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      z-index: 9999;
-      padding: 6px;
-      background: white;
-      border-radius: 4px;
-      border: 1px solid #777;
+    .legend-item {
+      display: flex;
+      align-items: center;
+      margin-bottom: 4px;
     }
   </style>
 </head>
 
 <body>
 
-<!-- State dropdown -->
 <select id="stateSelector">
-  <option value="">Select a state/territory</option>
-  <option value="NSW">New South Wales</option>
-  <option value="VIC">Victoria</option>
-  <option value="QLD">Queensland</option>
-  <option value="SA">South Australia</option>
-  <option value="WA">Western Australia</option>
-  <option value="TAS">Tasmania</option>
-  <option value="NT">Northern Territory</option>
-  <option value="ACT">Australian Capital Territory</option>
+  <option value="">Select state</option>
+  <option value="NSW">NSW</option>
+  <option value="VIC">VIC</option>
+  <option value="QLD">QLD</option>
+  <option value="SA">SA</option>
+  <option value="WA">WA</option>
+  <option value="TAS">TAS</option>
+  <option value="NT">NT</option>
+  <option value="ACT">ACT</option>
 </select>
 
 <div id="map"></div>
 
 <script>
-// --------------------------------------------------
-// TEST: Print when files load or fail
-// --------------------------------------------------
-console.log("Starting map...");
 
-// 1. CSV loader
+// CSV loader
 function loadCSVAsSet(url) {
-  console.log("Loading CSV:", url);
   return fetch(url)
-    .then(res => {
-      if (!res.ok) {
-        console.error("CSV FAILED to load:", url, res.status);
-      }
-      return res.text();
-    })
-    .then(text => {
-      console.log("CSV loaded OK:", url);
-      return new Set(
-        text
-          .split(/\r?\n/)
-          .map(l => l.trim())
-          .filter(Boolean)
-      );
-    });
+    .then(res => res.text())
+    .then(text =>
+      new Set(text.split(/\r?\n/).map(l => l.trim()).filter(Boolean))
+    );
 }
 
-const LGA_NAME_FIELD = "LGA_NAME21"; // our best guess
+const LGA_NAME_FIELD = "LGA_NAME21"; // correct for your dataset
 
-// 2. Setup map
+const welcomingColor = "#4f83cc";
+const crispColor = "#e8a04b";
+
 const map = L.map("map").setView([-25.5, 134.5], 4);
+L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
-  maxZoom: 18
-}).addTo(map);
+const bothPattern = new L.StripePattern({
+  weight: 4,
+  spaceWeight: 4,
+  color: welcomingColor,
+  opacity: 0.7,
+  angle: 45
+});
+bothPattern.addTo(map);
 
-console.log("Map created");
-
-// --------------------------------------------------
-// 3. Load EVERYTHING with diagnostics
-// --------------------------------------------------
 Promise.all([
-  loadCSVAsSet("data/welcoming_lgas.csv"),
-  loadCSVAsSet("data/crisp_lgas.csv"),
-  fetch("data/LGA_2025_AUST_GDA2020.min.json")
-    .then(res => {
-      if (!res.ok) {
-        console.error("GEOJSON FAILED to load:", res.status);
-      } else {
-        console.log("GeoJSON loaded OK");
-      }
-      return res.json();
-    })
-]).then(([welcomingSet, crispSet, geojsonData]) => {
+  loadCSVAsSet("welcoming_lgas.csv"),
+  loadCSVAsSet("crisp_lgas.csv"),
+  fetch("LGA_2025_AUST_GDA2020.min.json").then(r => r.json())
+]).then(([welcomingSet, crispSet, geojson]) => {
 
-  console.log("DATASETS loaded. Now checking GeoJSON structure...");
+  const welcomingLayer = L.geoJSON(null);
+  const crispLayer = L.geoJSON(null);
+  const bothLayer = L.geoJSON(null);
+  const otherLayer = L.geoJSON(null);
 
-  if (!geojsonData || !geojsonData.features) {
-    console.error("GeoJSON is empty or malformed.");
-    return;
+  function style(feature) {
+    const name = feature.properties[LGA_NAME_FIELD];
+    const inW = welcomingSet.has(name);
+    const inC = crispSet.has(name);
+
+    if (inW && inC) return { fillPattern: bothPattern, color:"#444", weight:1 };
+    if (inW) return { fillColor: welcomingColor, color:"#444", weight:1, fillOpacity:0.7 };
+    if (inC) return { fillColor: crispColor, color:"#444", weight:1, fillOpacity:0.7 };
+    return { fillColor:"#e5e5e5", color:"#aaa", weight:0.5, fillOpacity:0.3 };
   }
 
-  console.log("Number of features:", geojsonData.features.length);
-
-  // Print first feature
-  console.log("First feature properties:", geojsonData.features[0].properties);
-
-  // Check if LGA_NAME_FIELD exists
-  if (!(LGA_NAME_FIELD in geojsonData.features[0].properties)) {
-    console.error("❌ LGA name field NOT FOUND:", LGA_NAME_FIELD);
-    console.log("Available keys:", Object.keys(geojsonData.features[0].properties));
-    return;
-  } else {
-    console.log("✔ LGA name field FOUND:", LGA_NAME_FIELD);
+  function each(feature, layer) {
+    const name = feature.properties[LGA_NAME_FIELD];
+    const tags = [];
+    if (welcomingSet.has(name)) tags.push("Welcoming Cities");
+    if (crispSet.has(name)) tags.push("CRISP");
+    layer.bindTooltip(`<b>${name}</b><br>${tags.join(" & ") || "None"}`);
   }
 
-  // If code reaches here, we know the data is correct → polygons will load once styling is added
-  console.log("🎉 All data is valid. We can safely rebuild the full map now.");
+  geojson.features.forEach(f => {
+    const name = f.properties[LGA_NAME_FIELD];
+    const inW = welcomingSet.has(name);
+    const inC = crispSet.has(name);
+
+    const opts = { style, onEachFeature: each };
+
+    if (inW && inC) bothLayer.addData(f, opts);
+    else if (inW) welcomingLayer.addData(f, opts);
+    else if (inC) crispLayer.addData(f, opts);
+    else otherLayer.addData(f, opts);
+  });
+
+  otherLayer.addTo(map);
+  welcomingLayer.addTo(map);
+  crispLayer.addTo(map);
+  bothLayer.addTo(map);
+
+  map.fitBounds(L.geoJSON(geojson).getBounds());
+
+  // State bounding boxes
+  const stateBounds = {
+    NSW: [[-37.51, 140.96], [-28.16, 153.64]],
+    VIC: [[-39.2, 140.96], [-33.98, 150.0]],
+    QLD: [[-29.18, 138.0], [-9.14, 153.55]],
+    SA:  [[-38.06, 129.0], [-25.0, 141.0]],
+    WA:  [[-35.1, 112.0], [-13.0, 129.0]],
+    TAS: [[-44.0, 144.0], [-39.0, 149.0]],
+    NT:  [[-26.0, 129.0], [-10.0, 138.0]],
+    ACT: [[-35.92, 148.75], [-35.12, 149.4]]
+  };
+
+  document.getElementById("stateSelector").addEventListener("change", e => {
+    const st = e.target.value;
+    if (stateBounds[st]) map.fitBounds(stateBounds[st]);
+  });
 
 });
+
 </script>
-
-
 </body>
 </html>
