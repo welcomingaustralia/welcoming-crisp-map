@@ -2,11 +2,12 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Welcoming LGA Test</title>
+  <title>Welcoming + CRISP LGA Map</title>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://unpkg.com/leaflet.pattern/dist/leaflet.pattern.js"></script>
 
   <style>
     html, body { margin:0; height:100%; }
@@ -18,60 +19,86 @@
 <div id="map"></div>
 
 <script>
-
-// ⭐⭐ USE RAW GITHUB URLs LIKE THE WORKING MAP ⭐⭐
+// ⭐⭐ RAW GITHUB URLs ⭐⭐
 const GEOJSON_URL =
   "https://raw.githubusercontent.com/welcomingaustralia/welcoming-crisp-map/main/LGA_2025_AUST_GDA2020.min.json";
 
-const WELC_LGAS_URL =
+const WELC_URL =
   "https://raw.githubusercontent.com/welcomingaustralia/welcoming-crisp-map/main/welcoming_lgas.csv";
 
-// PapaParse CSV loader
+const CRISP_URL =
+  "https://raw.githubusercontent.com/welcomingaustralia/welcoming-crisp-map/main/crisp_lgas.csv";
+
+// PapaParse loader (same as working map)
 function loadCSV(url) {
   return fetch(url)
     .then(r => r.text())
-    .then(t => Papa.parse(t, { header: true, skipEmptyLines: true }).data);
+    .then(t => Papa.parse(t, { header:true, skipEmptyLines:true }).data);
 }
 
-const map = L.map("map").setView([-25, 134], 4);
+const map = L.map("map").setView([-25,134],4);
 L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png").addTo(map);
 
-// ⭐⭐ MAIN LOGIC ⭐⭐
+// ⭐⭐ STRIPED PATTERN ⭐⭐
+const bothPattern = new L.StripePattern({
+  weight: 4,
+  spaceWeight: 4,
+  color: "#4f83cc",
+  opacity: 0.8,
+  angle: 45
+});
+bothPattern.addTo(map);
+
+// ⭐⭐ MAIN DATA LOAD ⭐⭐
 Promise.all([
-  loadCSV(WELC_LGAS_URL),
+  loadCSV(WELC_URL),
+  loadCSV(CRISP_URL),
   fetch(GEOJSON_URL).then(r => r.json())
 ])
-.then(([welcRows, geojson]) => {
+.then(([welcRows, crispRows, geojson]) => {
 
+  // Convert CSVs → Sets
   const welcomingSet = new Set(
     welcRows.map(r => r.lga_name?.trim()).filter(Boolean)
   );
 
-  console.log("Welcoming LGAs loaded:", welcomingSet);
+  const crispSet = new Set(
+    crispRows.map(r => r.LGA?.trim()).filter(Boolean)
+  );
 
+  console.log("Welcoming:", welcomingSet);
+  console.log("CRISP:", crispSet);
+
+  // ⭐⭐ STYLE FUNCTION ⭐⭐
   function style(f) {
     const name = f.properties.LGA_NAME25;
+    const inW = welcomingSet.has(name);
+    const inC = crispSet.has(name);
 
-    if (welcomingSet.has(name)) {
-      return {
-        fillColor: "#4f83cc",
-        color: "#1e3d66",
-        weight: 1,
-        fillOpacity: 0.7
-      };
+    if (inW && inC) {
+      return { fillPattern: bothPattern, color:"#333", weight:1 };
+    }
+    if (inW) {
+      return { fillColor:"#4f83cc", color:"#1e3d66", weight:1, fillOpacity:0.7 };
+    }
+    if (inC) {
+      return { fillColor:"#e8a04b", color:"#8a5a1f", weight:1, fillOpacity:0.7 };
     }
 
-    return {
-      fillColor: "transparent",
-      color: "#ccc",
-      weight: 0.4,
-      fillOpacity: 0
-    };
+    // everything else remains transparent
+    return { fillColor:"transparent", color:"#ccc", weight:0.4, fillOpacity:0 };
   }
 
+  // Draw polygons
   L.geoJSON(geojson, {
     style,
-    onEachFeature: (f, layer) => layer.bindTooltip(f.properties.LGA_NAME25)
+    onEachFeature: (f, layer) => {
+      const name = f.properties.LGA_NAME25;
+      const labels = [];
+      if (welcomingSet.has(name)) labels.push("Welcoming");
+      if (crispSet.has(name)) labels.push("CRISP");
+      layer.bindTooltip(`<b>${name}</b><br>${labels.join(" & ")}`);
+    }
   }).addTo(map);
 
   map.fitBounds(L.geoJSON(geojson).getBounds());
